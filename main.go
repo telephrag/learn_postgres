@@ -1,18 +1,29 @@
 package main
 
 import (
-	"context"
+	"fmt"
 	"log"
+	"os"
+	"os/signal"
 	"postgres_study/config"
-
-	"github.com/jackc/pgx/v4"
+	"postgres_study/psql_db"
+	"syscall"
 )
 
 func main() {
-	dbCtx := context.Background()
-	db, err := pgx.Connect(dbCtx, config.DB_URL)
+	db, err := psql_db.NewInstance(config.PSQL_DB_URL)
 	if err != nil {
 		log.Fatalf("Failed to connect to db: %v\n", err)
 	}
-	defer db.Close(dbCtx)
+	defer db.Close()
+
+	if err = psql_db.SampleChangestream("changestream"); err != nil {
+		log.Fatalf("Changestream error: %v\n", err)
+	}
+
+	interupt := make(chan os.Signal, 1)
+	signal.Notify(interupt, syscall.SIGTERM, syscall.SIGINT)
+	<-interupt
+
+	fmt.Println()
 }
