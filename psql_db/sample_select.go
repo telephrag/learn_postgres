@@ -1,25 +1,25 @@
 package psql_db
 
 import (
+	"context"
 	"fmt"
+	"postgres_study/models"
+
+	"github.com/jackc/pgx/v4/pgxpool"
 )
 
-func (pi *PostgresInstance) SampleSelect() error {
-	type Row struct {
-		Id   int64
-		Name string
-	}
+func SampleSelect(ctx context.Context, conn *pgxpool.Conn) error {
 
-	rows, err := pi.Conn.Query(
-		pi.Ctx,
+	rows, err := conn.Query(
+		ctx,
 		"select * from interest order by id",
 	)
 	if err != nil {
 		return fmt.Errorf("failed to execute query: %v", err)
 	}
 	for rows.Next() {
-		r := Row{}
-		err := rows.Scan(&r.Id, &r.Name)
+		r := models.Interest{}
+		err := rows.Scan(r.GetScanForm()...)
 		if err != nil {
 			return fmt.Errorf("failed to scan row: %v", err)
 		}
