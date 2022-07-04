@@ -22,61 +22,14 @@ func (o *OplogExpire) GetScanForm() []interface{} {
 	}
 }
 
-// Realization of TTL index. Deletes records once they expire.
-func WatchExpirations(ctx context.Context, conn *pgxpool.Conn) error { // run it async
+func WatchExpirations(ctx context.Context, conn *pgxpool.Conn) error {
 	for {
-		// get row count and init slice for scans
-		countRow, err := conn.Conn().Query(ctx, "select count(id) from oplog")
-		if err != nil {
-			return fmt.Errorf("failed to get row count: %v", err)
-		}
-
-		var opCount int
-		countRow.Next()
-		err = countRow.Scan(&opCount)
-		if err != nil {
-			return fmt.Errorf("failed to scan row count: %v", err)
-		}
-		countRow.Close()
-
-		if opCount == 0 {
-			continue
-		}
-
-		oplog := make([]OplogExpire, opCount)
-
-		// query and scan into slice
-		rows, err := conn.Conn().Query(ctx, "select id, expire from oplog")
-		if err != nil {
-			return fmt.Errorf("failed to get oplog rows: %v", err)
-		}
-
-		var i int = 0
-		for rows.Next() {
-			err := rows.Scan(oplog[i].GetScanForm()...)
-			if err != nil {
-				return fmt.Errorf("failed to scan row: %v", err)
-			}
-
-			if rows.Err() != nil {
-				return rows.Err()
-			}
-
-			i++
-		}
-		rows.Close()
-
-		// query deletions for expired records
 		now := time.Now().UTC()
-		for _, op := range oplog {
-			if op.Expire.Before(now) {
-				_, err := conn.Exec(ctx, "delete from oplog where id=$1", op.ID)
-				if err != nil {
-					return fmt.Errorf("failed to delete expired op record: %v", err)
-				}
-				log.Printf("deleted record at id: %d\n", op.ID)
-			}
+		ct, err := conn.Exec(context.Background(), "delete from oplog where expire<$1", now)
+		if err != nil {
+			return fmt.Errorf("failed to delete expired op records: %v", err)
 		}
+		log.Printf("%d expired records deleted from oplog\n", ct.RowsAffected())
 
 		sleep := time.After(time.Second * config.WATCH_EXPIRATIONS_INTERVAL_SECONDS)
 	hang:
@@ -88,6 +41,5 @@ func WatchExpirations(ctx context.Context, conn *pgxpool.Conn) error { // run it
 				break hang
 			}
 		}
-
 	}
 }
