@@ -6,50 +6,67 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"postgres_study/changestream"
 	"postgres_study/config"
-	"postgres_study/psql_db"
+	"postgres_study/expiration"
 	"syscall"
 
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
 func main() {
-	ctx, cancel := context.WithCancel(context.Background())
-	pool, err := pgxpool.Connect(ctx, config.PSQL_DB_URL)
+	pool, err := pgxpool.Connect(context.Background(), config.PSQL_DB_URL)
 	if err != nil {
 		log.Fatalf("Failed to connect to pgxPool: %v\n", err)
 	}
 	defer pool.Close()
 
-	conn, err := pool.Acquire(ctx)
-	if err != nil {
-		log.Fatalf("Failed to aquire connection from pgxPool: %v\n", err)
-	}
-	defer conn.Conn().Close(ctx)
+	csCtx, cancelChangestream := context.WithCancel(context.Background())
+	go func() {
+		conn, err := pool.Acquire(context.Background())
+		if err != nil {
+			log.Fatalf("Failed to aquire connection from pgxPool: %v\n", err)
+		}
+		defer conn.Release()
 
-	if err = psql_db.SampleSelect(ctx, conn); err != nil {
-		log.Fatalf("Failed select query: %v\n", err)
-	}
-
-	go func() { // we are not using this connection anywhere else so async is fine
-		if err = psql_db.SampleChangestream(ctx, conn, "changestream"); err != nil {
-			if ctx.Err() == context.Canceled {
-				log.Printf("Changestream is closed: %v\n", ctx.Err())
-			} else {
-				log.Fatalf("Changestream error: %v\n", err)
-			}
+		err = changestream.HandleChangestream(csCtx, conn, "changestream")
+		if csCtx.Err() == context.Canceled {
+			log.Printf("changestream is closed: %v\n", csCtx.Err())
+			return
+		}
+		if err != nil {
+			log.Fatalf("changestream error: %v\n", err)
 		}
 	}()
 
-	log.Println("Press ^C to ceasy waiting for notification from changestream.")
+	watchCtx, cancelWatch := context.WithCancel(context.Background())
+	go func() {
+		conn, err := pool.Acquire(context.Background())
+		if err != nil {
+			log.Fatalf("Failed to aquire connection from pgxPool: %v\n", err)
+		}
+		defer conn.Release()
+
+		err = expiration.WatchExpirations(watchCtx, conn)
+		if csCtx.Err() == context.Canceled {
+			log.Printf("changestream is closed: %v\n", csCtx.Err())
+			return
+		}
+		if err != nil {
+			log.Fatalf("expiration watch error: %v", err)
+		}
+	}()
+
+	log.Println("Press ^C to cease waiting for notification from changestream and watching expirations.")
 
 	interupt := make(chan os.Signal, 1)
 	signal.Notify(interupt, syscall.SIGTERM, syscall.SIGINT)
 	<-interupt
-	cancel()
 
-	<-interupt
+	defer fmt.Println()
+	defer cancelWatch()
+	defer cancelChangestream()
 
-	fmt.Println()
-	os.Exit(0)
+	// wont close right away since WatchExpirations() is waiting
+	// for another chance to check if context is done
 }

@@ -1,4 +1,4 @@
-package psql_db
+package changestream
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
-func SampleChangestream(ctx context.Context, conn *pgxpool.Conn, chanName string) error {
+func HandleChangestream(ctx context.Context, conn *pgxpool.Conn, chanName string) error {
 
 	_, err := conn.Exec(ctx, "listen changestream")
 	if err != nil {
