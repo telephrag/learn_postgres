@@ -15,13 +15,13 @@ func SampleSelect(ctx context.Context, conn *pgxpool.Conn) error {
 		"select * from interest order by id",
 	)
 	if err != nil {
-		return fmt.Errorf("failed to execute query: %v", err)
+		return fmt.Errorf("failed to execute query: %w", err)
 	}
 	for rows.Next() {
 		r := models.Interest{}
 		err := rows.Scan(r.GetScanForm()...)
 		if err != nil {
-			return fmt.Errorf("failed to scan row: %v", err)
+			return fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		if rows.Err() != nil {

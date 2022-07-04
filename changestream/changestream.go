@@ -33,6 +33,8 @@ func HandleChangestream(ctx context.Context, conn *pgxpool.Conn, chanName string
 
 var handlerToOp = map[string]func(od *models.OplogDiff){
 	"INSERT": InsertHandle,
+	"UPDATE": nil,
+	"DELETE": nil,
 }
 
 func InsertHandle(od *models.OplogDiff) {

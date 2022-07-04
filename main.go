@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -17,7 +18,7 @@ import (
 func main() {
 	pool, err := pgxpool.Connect(context.Background(), config.PSQL_DB_URL)
 	if err != nil {
-		log.Fatalf("Failed to connect to pgxPool: %v\n", err)
+		log.Panicf("Failed to connect to pgxPool: %v\n", err)
 	}
 	defer pool.Close()
 
@@ -25,17 +26,17 @@ func main() {
 	go func() {
 		conn, err := pool.Acquire(context.Background())
 		if err != nil {
-			log.Fatalf("Failed to aquire connection from pgxPool: %v\n", err)
+			log.Panicf("Failed to aquire connection from pgxPool: %v\n", err)
 		}
 		defer conn.Release()
 
 		err = changestream.HandleChangestream(csCtx, conn, "changestream")
+		if err != nil && errors.Unwrap(err) != context.Canceled { // do not lose context's error
+			defer log.Panicf("changestream error: %v\n", err)
+		}
 		if csCtx.Err() == context.Canceled {
 			log.Printf("changestream is closed: %v\n", csCtx.Err())
 			return
-		}
-		if err != nil {
-			log.Fatalf("changestream error: %v\n", err)
 		}
 	}()
 
@@ -43,17 +44,18 @@ func main() {
 	go func() {
 		conn, err := pool.Acquire(context.Background())
 		if err != nil {
-			log.Fatalf("Failed to aquire connection from pgxPool: %v\n", err)
+			log.Panicf("Failed to aquire connection from pgxPool: %v\n", err)
 		}
 		defer conn.Release()
 
 		err = expiration.WatchExpirations(watchCtx, conn)
-		if csCtx.Err() == context.Canceled {
-			log.Printf("changestream is closed: %v\n", csCtx.Err())
-			return
+
+		if err != nil && errors.Unwrap(err) != context.Canceled {
+			defer log.Panicf("expiration watch error: %v", err)
 		}
-		if err != nil {
-			log.Fatalf("expiration watch error: %v", err)
+		if csCtx.Err() == context.Canceled {
+			log.Printf("deletion of expired records is ceased: %v\n", csCtx.Err())
+			return
 		}
 	}()
 
